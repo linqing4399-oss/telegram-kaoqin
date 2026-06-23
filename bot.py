@@ -34,7 +34,7 @@ def is_admin(user_id):
 
 ```
 ADMIN_IDS = [
-    123456789
+    lq07168
 ]
 
 return user_id in ADMIN_IDS
