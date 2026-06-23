@@ -44,7 +44,7 @@ async def send_bot_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # resize_keyboard=True 让按钮自动适应手机屏幕高度，不至于铺满半个屏幕
     # persistent=True 让它常驻在聊天框下方
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, persistent=True)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
     
     await update.message.reply_text(
         "✨ **考勤机器人专属快捷键盘已启用**\n你可以直接点击输入框下方的精美按钮进行操作：",
