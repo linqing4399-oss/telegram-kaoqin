@@ -38,7 +38,7 @@ def is_admin(uid):
     return uid in ADMIN_IDS
 
 def current_month():
-return datetime.now().strftime(
+    return datetime.now().strftime(
 "%Y-%m"
 )
 
