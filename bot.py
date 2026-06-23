@@ -30,30 +30,37 @@ date TEXT
 
 db.commit()
 
-def is_admin(user_id):
-
-```
 ADMIN_IDS = [
-    lq07168
+lq07168
 ]
 
-return user_id in ADMIN_IDS
-```
+def is_admin(uid):
+return uid in ADMIN_IDS
 
-async def work(update: Update,
-context: ContextTypes.DEFAULT_TYPE):
+def current_month():
+return datetime.now().strftime(
+"%Y-%m"
+)
+
+async def work(
+update: Update,
+context
+):
 
 ```
-uid = update.message.from_user.id
+uid = (
+update.message.from_user.id
+)
 
 name = (
-    update.message.from_user.full_name
+update.message.from_user.full_name
 )
 
 today = (
-    datetime.now()
-    .strftime("%Y-%m-%d")
+datetime.now()
+.strftime("%Y-%m-%d")
 )
+
 
 cur.execute(
 ```
@@ -95,8 +102,57 @@ await update.message.reply_text(
 )
 ```
 
-async def query(update,
-context):
+async def month_query(
+update,
+context
+):
+
+```
+uid = (
+update.message.from_user.id
+)
+
+month = (
+current_month()
+)
+
+cur.execute(
+```
+
+"""
+SELECT COUNT(*)
+
+FROM attendance
+
+WHERE user_id=?
+AND date
+LIKE ?
+""",
+
+(
+uid,
+f"{month}%"
+)
+)
+
+```
+days = (
+cur.fetchone()[0]
+)
+
+await update.message.reply_text(
+```
+
+f"""你本月已上班：
+
+{days} 天"""
+
+)
+
+async def total_query(
+update,
+context
+):
 
 ```
 uid = (
@@ -108,7 +164,9 @@ cur.execute(
 
 """
 SELECT COUNT(*)
+
 FROM attendance
+
 WHERE user_id=?
 """,
 (uid,)
@@ -122,7 +180,7 @@ cur.fetchone()[0]
 await update.message.reply_text(
 ```
 
-f"""你的累计上班天数：
+f"""历史累计：
 
 {total} 天"""
 
@@ -143,68 +201,10 @@ if not is_admin(uid):
     return
 
 
-cur.execute(
-```
-
-"""
-SELECT
-name,
-COUNT(*)
-
-FROM attendance
-
-GROUP BY name
-
-ORDER BY name
-"""
-)
-
-```
-rows = (
-cur.fetchall()
-)
-
-msg = (
-"全部人员统计\n\n"
-)
-
-for n, c in rows:
-
-    msg += (
-```
-
-f"{n}：{c}天\n"
-)
-
-```
-await update.message.reply_text(
-msg
-)
-```
-
-async def excel(
-update,
-context
-):
-
-```
-uid = (
-update.message.from_user.id
-)
-
-if not is_admin(uid):
-
-    return
-
-
 month = (
-```
-
-datetime.now()
-.strftime("%Y-%m")
+current_month()
 )
 
-```
 cur.execute(
 ```
 
@@ -222,7 +222,79 @@ GROUP BY name
 
 ORDER BY name
 """,
-(f"{month}%",)
+
+(
+f"{month}%",
+)
+)
+
+```
+rows = (
+cur.fetchall()
+)
+
+
+msg = (
+```
+
+f"{month} 上班统计\n\n"
+)
+
+```
+for n, d in rows:
+
+    msg += (
+```
+
+f"{n}：{d}天\n"
+)
+
+```
+await update.message.reply_text(
+msg
+)
+```
+
+async def export_excel(
+update,
+context
+):
+
+```
+uid = (
+update.message.from_user.id
+)
+
+if not is_admin(uid):
+
+    return
+
+
+month = (
+current_month()
+)
+
+cur.execute(
+```
+
+"""
+SELECT
+name,
+COUNT(*)
+
+FROM attendance
+
+WHERE date
+LIKE ?
+
+GROUP BY name
+
+ORDER BY name
+""",
+
+(
+f"{month}%",
+)
 )
 
 ```
@@ -236,7 +308,7 @@ wb = Workbook()
 ws = wb.active
 
 ws.title = (
-"考勤统计"
+month
 )
 
 
@@ -247,37 +319,35 @@ ws.append([
 ])
 
 
-index = 1
+i = 1
 
 
-for n, c in rows:
+for n, d in rows:
 
     ws.append([
-        index,
+        i,
         n,
-        c
+        d
     ])
 
-    index += 1
+    i += 1
 
 
-filename = (
+file = (
 ```
 
-f"{month}考勤.xlsx"
+f"{month}_考勤.xlsx"
 )
 
 ```
 wb.save(
-filename
-```
-
+file
 )
 
-```
+
 await update.message.reply_document(
-document=open(
-filename,
+open(
+file,
 "rb"
 )
 )
@@ -294,7 +364,7 @@ MessageHandler(
 filters.TEXT
 &
 filters.Regex(
-"^上班$"
+r"^上班$"
 ),
 work
 )
@@ -305,9 +375,20 @@ MessageHandler(
 filters.TEXT
 &
 filters.Regex(
-"^查询$"
+r"^查询$"
 ),
-query
+month_query
+)
+)
+
+app.add_handler(
+MessageHandler(
+filters.TEXT
+&
+filters.Regex(
+r"^累计$"
+),
+total_query
 )
 )
 
@@ -321,7 +402,7 @@ admin_query
 app.add_handler(
 CommandHandler(
 "excel",
-excel
+export_excel
 )
 )
 
