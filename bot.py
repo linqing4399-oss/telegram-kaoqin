@@ -98,3 +98,62 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         cursor.execute('SELECT COUNT(*) FROM attendance WHERE user_id = ? AND date LIKE ?', (user_id, f"{current_month}%"))
         result = cursor.fetchone()
         conn.close()
+        count = result[0] if result else 0
+        await update.message.reply_text(f"📊 {full_name}，您本月累计上班打卡天数为：{count}天。")
+
+    # C. 触发全员考勤统计
+    elif text == "📋 全员考勤统计(限管理)":
+        if not await is_group_admin(update, context):
+            await update.message.reply_text("❌ 你没有查询权限")
+            return
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT full_name, COUNT(*) FROM attendance WHERE date LIKE ? GROUP BY user_id ORDER BY full_name ASC', (f"{current_month}%",))
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text(f"📊 {current_month} 暂无打卡记录。")
+            return
+        report = f"📅 **{current_month} 全员考勤统计结算**\n`序号 | 名字 | 打卡天数`\n-------------------------\n"
+        for idx, row in enumerate(rows, 1):
+            report += f"{idx} | {row[0]} | **{row[1]}天**\n"
+        await update.message.reply_text(report, parse_mode="Markdown")
+
+# ================= 4. 异步核心主入口 (完美解决 Python 3.14 报错) =================
+async def run_bot_and_web():
+    # 初始化数据库
+    init_db()
+    
+    # 从 Render 系统的环境变数中安全读取 Token
+    TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        print("错误：未找到系统环境变量 BOT_TOKEN！")
+        return
+        
+    # 初始化 Telegram 机器人
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("menu", send_bot_menu))
+    application.add_handler(CommandHandler("start", send_bot_menu))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_keyboard_buttons))
+
+    # 使用异步执行器将 Flask 网页放至后台运行，防止其阻塞主事件循环
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, run_web_server)
+    
+    # 启动机器人
+    print("机器人已成功初始化并在后台启动...")
+    async with application:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        
+        # 维持异步事件循环持续运转
+        while True:
+            await asyncio.sleep(3600)
+
+def main():
+    # 使用 asyncio.run 全局托管，彻底杜绝多线程冲突引发的崩溃
+    asyncio.run(run_bot_and_web())
+
+if __name__ == '__main__':
+    main()
