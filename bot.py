@@ -9,9 +9,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-import os
-
-TOKEN=os.getenv("TOKEN")
+TOKEN="8924411075:AAEpy5a0IlVAGJCH2CtOMRERO8eGCFMEsCE"
 
 ADMIN_ID = 123456789
 
