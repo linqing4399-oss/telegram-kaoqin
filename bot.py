@@ -35,7 +35,7 @@ lq07168
 ]
 
 def is_admin(uid):
-return uid in ADMIN_IDS
+    return uid in ADMIN_IDS
 
 def current_month():
 return datetime.now().strftime(
