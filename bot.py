@@ -148,7 +148,7 @@ def main():
     init_db()
     
     # ⚠️ 替换为你的真实 Bot Token
-    TOKEN = "YOUR_BOT_TOKEN_HERE"
+    TOKEN = "8948616036:AAGxG8hD6-BAwE-LB2B9nM9aoFcNKSqIkx8"
     
     application = Application.builder().token(TOKEN).build()
 
