@@ -1,12 +1,10 @@
-import os
 import sqlite3
 import datetime
-import pandas as pd
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ----------------- 数据库初始化 -----------------
-DB_FILE = "attendance_v2.db"
+DB_FILE = "attendance_v3.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -78,9 +76,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         count = result[0] if result else 0
         await update.message.reply_text(f"📊 {full_name}，您本月累计上班打卡天数为：{count}天。")
 
-# 管理员指令 /cx ：查询所有人当月的上班天数（按字母A-Z排序）
+# 管理员指令 /cx ：随时查询所有人当月的上班天数（按字母A-Z排序）
 async def admin_check_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 权限检查
     if not await is_group_admin(update, context):
         await update.message.reply_text("❌ 抱歉，该命令仅限群管理员在群组中使用。")
         return
@@ -91,7 +88,7 @@ async def admin_check_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 筛选当月数据，按 full_name (名字) 字母 A-Z 排序
     cursor.execute('''
-        SELECT full_name, username, COUNT(*) 
+        SELECT full_name, COUNT(*) 
         FROM attendance 
         WHERE date LIKE ? 
         GROUP BY user_id 
@@ -104,16 +101,15 @@ async def admin_check_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"📊 {current_month} 暂无打卡记录。")
         return
 
-    report = f"📊 **{current_month} 全员考勤统计（按字母排序）**\n"
+    report = f"📊 **{current_month} 全员考勤实时统计（A-Z排序）**\n"
     report += "-------------------------\n"
     for idx, row in enumerate(rows, 1):
-        report += f"{idx}. {row[0]} ({row[1]}): **{row[2]}天**\n"
+        report += f"{idx}. {row[0]} : **{row[1]}天**\n"
     
     await update.message.reply_text(report, parse_mode="Markdown")
 
-# 管理员指令 /export ：月底统计并导出 Excel 表格
-async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 权限检查
+# 管理员指令 /report ：月底统计每人每月上班天数（文本报表形式）
+async def monthly_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_group_admin(update, context):
         await update.message.reply_text("❌ 抱歉，该命令仅限群管理员在群组中使用。")
         return
@@ -134,44 +130,25 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     if not rows:
-        await update.message.reply_text("❌ 本月没有任何打卡数据，无法导出。")
+        await update.message.reply_text(f"❌ {current_month} 没有任何打卡数据，无法生成报表。")
         return
 
-    # 构建符合要求的格式：第一列序号，第二列名字，第三列打卡天数
-    data = []
-    for idx, row in enumerate(rows, 1):
-        data.append({
-            "序号": idx,
-            "名字": row[0],
-            "打卡天数": row[1]
-        })
-
-    # 使用 pandas 转换为数据表并导出为 Excel
-    df = pd.DataFrame(data)
-    file_name = f"考勤统计_{current_month}.xlsx"
+    # 生成符合格式要求的文本：第一列序号，第二列名字，第三列打卡天数
+    report = f"📅 **{current_month} 月底全员考勤统计结算**\n"
+    report += "`序号 | 名字 | 打卡天数`\n"
+    report += "-------------------------\n"
     
-    # 保存为本地文件
-    df.to_excel(file_name, index=False)
+    for idx, row in enumerate(rows, 1):
+        report += f"{idx} | {row[0]} | **{row[1]}天**\n"
 
-    # 发送文件给群组
-    try:
-        with open(file_name, "rb") as excel_file:
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=excel_file,
-                caption=f"📅 {current_month} 月底考勤统计表格已生成。"
-            )
-        # 发送完后删除本地临时文件，节约空间
-        os.remove(file_name)
-    except Exception as e:
-        await update.message.reply_text(f"❌ 导出文件失败: {e}")
+    await update.message.reply_text(report, parse_mode="Markdown")
 
 # ----------------- 主程序 -----------------
 def main():
     init_db()
     
     # ⚠️ 替换为你的真实 Bot Token
-    TOKEN = "8948616036:AAGxG8hD6-BAwE-LB2B9nM9aoFcNKSqIkx8"
+    TOKEN = "YOUR_BOT_TOKEN_HERE"
     
     application = Application.builder().token(TOKEN).build()
 
@@ -179,8 +156,8 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     
     # 监听管理员指令
-    application.add_handler(CommandHandler("cx", admin_check_all))   # 管理员输入 /cx 查询所有人
-    application.add_handler(CommandHandler("export", export_excel))  # 管理员输入 /export 导出 Excel
+    application.add_handler(CommandHandler("cx", admin_check_all))       # 管理员输入 /cx 随时群查
+    application.add_handler(CommandHandler("report", monthly_report))   # 管理员输入 /report 月底结算统计
 
     # 启动机器人
     print("机器人已启动，正在监听群聊消息...")
