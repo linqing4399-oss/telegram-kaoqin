@@ -4,14 +4,18 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import (
 ApplicationBuilder,
-MessageHandler,
 CommandHandler,
+MessageHandler,
 ContextTypes,
-filters
+filters,
 )
 from openpyxl import Workbook
 
 TOKEN = os.getenv("TOKEN")
+
+ADMIN_IDS = [
+lq07168
+]
 
 db = sqlite3.connect(
 "attendance.db",
@@ -30,327 +34,257 @@ date TEXT
 
 db.commit()
 
-ADMIN_IDS = [
-lq07168
-]
-
 def is_admin(uid):
-    return uid in ADMIN_IDS
+return uid in ADMIN_IDS
 
-def current_month():
-    return datetime.now().strftime(
-"%Y-%m"
-)
+def get_month():
+return datetime.now().strftime("%Y-%m")
 
-async def work(
+def get_today():
+return datetime.now().strftime("%Y-%m-%d")
+
+async def checkin(
 update: Update,
-context
+context: ContextTypes.DEFAULT_TYPE
 ):
 
 ```
-uid = (
-update.message.from_user.id
-)
+uid = update.message.from_user.id
 
 name = (
-update.message.from_user.full_name
+    update.message.from_user.full_name
 )
 
-today = (
-datetime.now()
-.strftime("%Y-%m-%d")
-)
-
+today = get_today()
 
 cur.execute(
-```
-
-"""
-SELECT 1
-FROM attendance
-WHERE user_id=?
-AND date=?
-""",
-(uid, today)
+    """
+    SELECT 1
+    FROM attendance
+    WHERE user_id=?
+    AND date=?
+    """,
+    (
+        uid,
+        today
+    )
 )
 
-```
-if cur.fetchone():
+exists = cur.fetchone()
+
+if exists:
 
     await update.message.reply_text(
-    "你已经打过卡了"
+        "你已经打过卡了"
     )
 
     return
 
-
 cur.execute(
-```
-
-"""
-INSERT INTO attendance
-VALUES(?,?,?)
-""",
-(uid, name, today)
+    """
+    INSERT INTO attendance
+    VALUES(?,?,?)
+    """,
+    (
+        uid,
+        name,
+        today
+    )
 )
 
-```
 db.commit()
 
 await update.message.reply_text(
-"打卡成功"
+    "打卡成功"
 )
 ```
 
 async def month_query(
-update,
-context
+update: Update,
+context: ContextTypes.DEFAULT_TYPE
 ):
 
 ```
-uid = (
-update.message.from_user.id
-)
+uid = update.message.from_user.id
 
-month = (
-current_month()
-)
+month = get_month()
 
 cur.execute(
-```
-
-"""
-SELECT COUNT(*)
-
-FROM attendance
-
-WHERE user_id=?
-AND date
-LIKE ?
-""",
-
-(
-uid,
-f"{month}%"
-)
+    """
+    SELECT COUNT(*)
+    FROM attendance
+    WHERE user_id=?
+    AND date LIKE ?
+    """,
+    (
+        uid,
+        f"{month}%"
+    )
 )
 
-```
-days = (
-cur.fetchone()[0]
-)
+days = cur.fetchone()[0]
 
 await update.message.reply_text(
-```
-
-f"""你本月已上班：
-
-{days} 天"""
-
+    f"你本月已上班：\n{days} 天"
 )
+```
 
 async def total_query(
-update,
-context
+update: Update,
+context: ContextTypes.DEFAULT_TYPE
 ):
 
 ```
-uid = (
-update.message.from_user.id
-)
+uid = update.message.from_user.id
 
 cur.execute(
-```
-
-"""
-SELECT COUNT(*)
-
-FROM attendance
-
-WHERE user_id=?
-""",
-(uid,)
+    """
+    SELECT COUNT(*)
+    FROM attendance
+    WHERE user_id=?
+    """,
+    (
+        uid,
+    )
 )
 
-```
-total = (
-cur.fetchone()[0]
-)
+total = cur.fetchone()[0]
 
 await update.message.reply_text(
+    f"历史累计：\n{total} 天"
+)
 ```
 
-f"""历史累计：
-
-{total} 天"""
-
-)
-
 async def admin_query(
-update,
-context
+update: Update,
+context: ContextTypes.DEFAULT_TYPE
 ):
 
 ```
-uid = (
-update.message.from_user.id
-)
+uid = update.message.from_user.id
 
 if not is_admin(uid):
 
     return
 
-
-month = (
-current_month()
-)
+month = get_month()
 
 cur.execute(
-```
+    """
+    SELECT
+    name,
+    COUNT(*)
 
-"""
-SELECT
-name,
-COUNT(*)
+    FROM attendance
 
-FROM attendance
+    WHERE date LIKE ?
 
-WHERE date
-LIKE ?
+    GROUP BY name
 
-GROUP BY name
-
-ORDER BY name
-""",
-
-(
-f"{month}%",
-)
+    ORDER BY name ASC
+    """,
+    (
+        f"{month}%",
+    )
 )
 
-```
-rows = (
-cur.fetchall()
-)
+rows = cur.fetchall()
 
+if not rows:
 
-msg = (
-```
+    await update.message.reply_text(
+        "暂无数据"
+    )
 
-f"{month} 上班统计\n\n"
-)
+    return
 
-```
-for n, d in rows:
+msg = f"{month} 上班统计\n\n"
+
+for name, days in rows:
 
     msg += (
-```
+        f"{name}：{days}天\n"
+    )
 
-f"{n}：{d}天\n"
-)
-
-```
 await update.message.reply_text(
-msg
+    msg
 )
 ```
 
 async def export_excel(
-update,
-context
+update: Update,
+context: ContextTypes.DEFAULT_TYPE
 ):
 
 ```
-uid = (
-update.message.from_user.id
-)
+uid = update.message.from_user.id
 
 if not is_admin(uid):
 
     return
 
-
-month = (
-current_month()
-)
+month = get_month()
 
 cur.execute(
-```
+    """
+    SELECT
+    name,
+    COUNT(*)
 
-"""
-SELECT
-name,
-COUNT(*)
+    FROM attendance
 
-FROM attendance
+    WHERE date LIKE ?
 
-WHERE date
-LIKE ?
+    GROUP BY name
 
-GROUP BY name
-
-ORDER BY name
-""",
-
-(
-f"{month}%",
-)
+    ORDER BY name ASC
+    """,
+    (
+        f"{month}%",
+    )
 )
 
-```
-rows = (
-cur.fetchall()
-)
-
+rows = cur.fetchall()
 
 wb = Workbook()
 
 ws = wb.active
 
-ws.title = (
-month
-)
-
+ws.title = "考勤统计"
 
 ws.append([
-"序号",
-"名字",
-"打卡天数"
+    "序号",
+    "名字",
+    "打卡天数"
 ])
 
-
-i = 1
-
-
-for n, d in rows:
+for i, row in enumerate(
+    rows,
+    start=1
+):
 
     ws.append([
         i,
-        n,
-        d
+        row[0],
+        row[1]
     ])
 
-    i += 1
-
-
-file = (
-```
-
-f"{month}_考勤.xlsx"
+filename = (
+    f"{month}_考勤.xlsx"
 )
 
-```
 wb.save(
-file
+    filename
 )
 
+with open(
+    filename,
+    "rb"
+) as file:
 
-await update.message.reply_document(
-open(
-file,
-"rb"
-)
-)
+    await update.message.reply_document(
+        file
+    )
 ```
 
 app = (
@@ -363,10 +297,8 @@ app.add_handler(
 MessageHandler(
 filters.TEXT
 &
-filters.Regex(
-r"^上班$"
-),
-work
+filters.Regex("^上班$"),
+checkin
 )
 )
 
@@ -374,9 +306,7 @@ app.add_handler(
 MessageHandler(
 filters.TEXT
 &
-filters.Regex(
-r"^查询$"
-),
+filters.Regex("^查询$"),
 month_query
 )
 )
@@ -385,9 +315,7 @@ app.add_handler(
 MessageHandler(
 filters.TEXT
 &
-filters.Regex(
-r"^累计$"
-),
+filters.Regex("^累计$"),
 total_query
 )
 )
