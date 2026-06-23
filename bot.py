@@ -1,10 +1,10 @@
 import sqlite3
 import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ----------------- 数据库初始化 -----------------
-DB_FILE = "attendance_v5.db"
+DB_FILE = "attendance_v6.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -22,7 +22,9 @@ def init_db():
     conn.close()
 
 # ----------------- 辅助函数：检查管理员权限 -----------------
-async def is_group_admin(chat, user_id, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    chat = update.effective_chat
+    user_id = update.effective_user.id
     if chat.type in ["group", "supergroup"]:
         try:
             chat_member = await context.bot.get_chat_member(chat_id=chat.id, user_id=user_id)
@@ -32,55 +34,49 @@ async def is_group_admin(chat, user_id, context: ContextTypes.DEFAULT_TYPE) -> b
             return False
     return False
 
-# ----------------- 核心功能逻辑 -----------------
-
-# 1. 呼出快捷控制面板按钮 (/menu 或直接在群里发送)
-async def send_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 构建按钮布局 (每行一个按钮)
+# ----------------- 呼出底部常驻美化菜单 -----------------
+async def send_bot_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 这里定义底部键盘的样式和排版（第一排两个按钮，第二排一个大按钮）
     keyboard = [
-        [InlineKeyboardButton("⏰ 点击：上班打卡", callback_data="btn_dk")],
-        [InlineKeyboardButton("📊 点击：查询个人当月天数", callback_data="btn_cx")],
-        [InlineKeyboardButton("📋 点击：全员考勤统计(限管理)", callback_data="btn_kq")]
+        [KeyboardButton("⏰ 上班打卡"), KeyboardButton("📊 查询我当月天数")],
+        [KeyboardButton("📋 全员考勤统计(限管理)")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # resize_keyboard=True 让按钮自动适应手机屏幕高度，不至于铺满半个屏幕
+    # persistent=True 让它常驻在聊天框下方
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, persistent=True)
     
     await update.message.reply_text(
-        "👋 **欢迎使用考勤快捷控制面板**\n请直接点击下方对应按钮进行操作：", 
+        "✨ **考勤机器人专属快捷键盘已启用**\n你可以直接点击输入框下方的精美按钮进行操作：",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
-# 2. 集中处理所有按钮点击事件 (Callback Query)
-async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    # 必须先调用 answer() 告诉 Telegram 已经收到点击，防止按钮一直转圈圈
-    await query.answer()
-    
-    user = query.from_user
+# ----------------- 核心功能逻辑（通过识别按钮上的文字触发） -----------------
+async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user = update.effective_user
     user_id = user.id
     username = f"@{user.username}" if user.username else "无用户名"
     full_name = user.full_name
-    chat = query.message.chat
-    
     today = datetime.date.today().isoformat()
     current_month = datetime.date.today().strftime("%Y-%m")
 
-    # ---- 逻辑 A：点击了上班打卡 ----
-    if query.data == "btn_dk":
+    # 1. 触发打卡
+    if text == "⏰ 上班打卡":
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         try:
             cursor.execute("INSERT INTO attendance VALUES (?, ?, ?, ?)", (user_id, username, full_name, today))
             conn.commit()
-            # 在聊天框发送一条新消息反馈（也可以用 query.message.reply_text）
-            await context.bot.send_message(chat_id=chat.id, text=f"✅ {full_name} 打卡成功")
+            await update.message.reply_text("✅ 打卡成功")
         except sqlite3.IntegrityError:
-            await context.bot.send_message(chat_id=chat.id, text=f"⚠️ {full_name}，你已经打过卡了")
+            await update.message.reply_text("⚠️ 你已经打过卡了")
         finally:
             conn.close()
 
-    # ---- 逻辑 B：点击了查询个人天数 ----
-    elif query.data == "btn_cx":
+    # 2. 触发查询自己
+    elif text == "📊 查询我当月天数":
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute('''
@@ -91,13 +87,12 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         conn.close()
 
         count = result[0] if result else 0
-        await context.bot.send_message(chat_id=chat.id, text=f"📊 {full_name}，您本月累计上班打卡天数为：{count}天。")
+        await update.message.reply_text(f"📊 {full_name}，您本月累计上班打卡天数为：{count}天。")
 
-    # ---- 逻辑 C：点击了全员考勤统计 ----
-    elif query.data == "btn_kq":
-        # 权限校验
-        if not await is_group_admin(chat, user_id, context):
-            await context.bot.send_message(chat_id=chat.id, text=f"❌ {full_name}，你没有查询权限")
+    # 3. 触发考勤统计
+    elif text == "📋 全员考勤统计(限管理)":
+        if not await is_group_admin(update, context):
+            await update.message.reply_text("❌ 你没有查询权限")
             return
 
         conn = sqlite3.connect(DB_FILE)
@@ -113,7 +108,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         conn.close()
 
         if not rows:
-            await context.bot.send_message(chat_id=chat.id, text=f"📊 {current_month} 暂无打卡记录。")
+            await update.message.reply_text(f"📊 {current_month} 暂无打卡记录。")
             return
 
         report = f"📅 **{current_month} 全员考勤统计结算**\n"
@@ -122,7 +117,7 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         for idx, row in enumerate(rows, 1):
             report += f"{idx} | {row[0]} | **{row[1]}天**\n"
         
-        await context.bot.send_message(chat_id=chat.id, text=report, parse_mode="Markdown")
+        await update.message.reply_text(report, parse_mode="Markdown")
 
 # ----------------- 主程序 -----------------
 def main():
@@ -133,18 +128,15 @@ def main():
     
     application = Application.builder().token(TOKEN).build()
 
-    # 1. 注册基础命令（输入 /menu 或者 /start 弹出按钮面板）
-    application.add_handler(CommandHandler("menu", send_menu))
-    application.add_handler(CommandHandler("start", send_menu))
+    # 注册命令来呼出这个自定义底部键盘
+    application.add_handler(CommandHandler("menu", send_bot_menu))
+    application.add_handler(CommandHandler("start", send_bot_menu))
     
-    # 为了防止习惯，保留原来的文字命令触发也行
-    application.add_handler(CommandHandler("dk", lambda u, c: context.bot.send_message(u.effective_chat.id, "请使用 /menu 呼出面板点击按钮打卡")))
-    
-    # 2. 核心：注册按钮点击事件监听器
-    application.add_handler(CallbackQueryHandler(handle_button_click))
+    # 监听所有的文本消息（当用户点击自定义键盘时，等同于发出了对应的文本）
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_keyboard_buttons))
 
     # 启动机器人
-    print("机器人已启动，内联键盘已就绪...")
+    print("底部精美快捷键盘机器人已启动...")
     application.run_polling()
 
 if __name__ == '__main__':
