@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from threading import Thread
 from flask import Flask, render_template_string
 from telegram import Update
@@ -13,7 +14,7 @@ ledger = {}
 
 # ---- TELEGRAM 机器人逻辑 ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text('👋 记账机器人已在云端启动！\n\n直接输入 `+10000` 或 `-5000` 记账。\n输入 `/cx` 查询总额。')
+    await update.message.reply_text('👋 记账机器人已在云端成功启动！\n\n直接输入 `+10000` 或 `-5000` 记账。\n输入 `/cx` 查询总额。')
 
 async def handle_bookkeeping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
@@ -33,26 +34,40 @@ async def query_total(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     total = ledger.get(chat_id, 0)
     await update.message.reply_text(f"📊 当前累计总额：{total:,} 韩元")
 
-def run_bot():
-    """运行 Telegram 机器人的函数"""
-    # 从环境变量中读取 Token，避免代码泄露
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        print("❌ 错误: 未找到环境变量 BOT_TOKEN")
-        return
-    
+async def start_bot_async(token):
+    """在独立的事件循环中初始化并运行机器人"""
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cx", query_total))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bookkeeping))
     
-    print("🤖 Telegram Bot 正在后台运行...")
-    app.run_polling()
+    # 初始化并启动轮询
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    logging.info("🤖 Telegram Bot 轮询已成功在后台线程启动！")
+    
+    # 保持运行
+    while True:
+        await asyncio.sleep(3600)
+
+def run_bot_thread():
+    """后台线程入口：专门用来修复 Python 3.10+ 的无事件循环报错"""
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        logging.error("❌ 错误: 未找到环境变量 BOT_TOKEN")
+        return
+    
+    # 🔥 核心修复：显式为这个后台线程创建并设置一个新的事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # 使用这个循环运行异步机器人任务
+    loop.run_until_complete(start_bot_async(token))
 
 # ---- FLASK 网页伪装逻辑 ----
 flask_app = Flask(__name__)
 
-# 精美的伪装网页 HTML 模板（伪装成一个极简的云端数据监控台）
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -63,7 +78,7 @@ HTML_TEMPLATE = """
         .card { background: #1e293b; padding: 2.5rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); text-align: center; max-width: 400px; }
         h1 { color: #38bdf8; margin-top: 0; font-size: 1.5rem; }
         p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
-        .status { inline-size: auto; background: #065f46; color: #34d399; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; display: inline-block; margin-top: 1rem; }
+        .status { background: #065f46; color: #34d399; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; display: inline-block; margin-top: 1rem; }
     </style>
 </head>
 <body>
@@ -81,11 +96,11 @@ def home():
     return render_template_string(HTML_TEMPLATE)
 
 if __name__ == '__main__':
-    # 1. 启动 Telegram 机器人异步后台线程
-    bot_thread = Thread(target=run_bot)
+    # 1. 启动 Telegram 机器人后台线程
+    bot_thread = Thread(target=run_bot_thread, name="run_bot")
     bot_thread.daemon = True
     bot_thread.start()
 
-    # 2. 启动 Flask 网页服务（Render 会自动注入 PORT 环境变量）
+    # 2. 启动 Flask 网页服务
     port = int(os.getenv("PORT", 10000))
     flask_app.run(host='0.0.0.0', port=port)
