@@ -1,6 +1,8 @@
 import os
 import logging
 import asyncio
+import re
+from datetime import datetime
 from threading import Thread
 from flask import Flask, render_template_string
 from telegram import Update
@@ -9,30 +11,60 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # 1. 启用日志
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# 2. 内存账本
+# 2. 内存账本与日期管理
 ledger = {}
+# 初始化记录当前日期
+current_date = datetime.now().date()
+
+def check_and_reset_daily():
+    """检查日期是否改变，如果进入了新的一天，自动清空账本"""
+    global current_date
+    today = datetime.now().date()
+    if today != current_date:
+        logging.info(f"📆 日期已从 {current_date} 变为 {today}，账本自动清零！")
+        ledger.clear()  # 清空所有记账数据
+        current_date = today  # 更新当前日期
 
 # ---- TELEGRAM 机器人逻辑 ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text('👋 记账机器人已在云端成功启动！\n\n直接输入 `+10000` 或 `-5000` 记账。\n输入 `/cx` 查询总额。')
+    await update.message.reply_text(
+        '👋 记账机器人已在云端成功启动！\n\n'
+        '⚠️ **注意：** 必须带 `+` 或 `-` 符号才会记账。\n'
+        '👉 例如输入 `+10000` 或 `-5000` 记账。\n'
+        '📊 输入 `/cx` 查询总额（账目每天24:00自动清零）。'
+    )
 
 async def handle_bookkeeping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
     chat_id = update.effective_chat.id
+    
+    # 🔥 核心修改 1：检查是否跨天，跨天则自动清零
+    check_and_reset_daily()
+    
+    # 🔥 核心修改 2：使用正则表达式严格匹配
+    # 必须以 + 或 - 开头，后面跟着纯数字。如果前面没有符号，则直接忽略不处理。
+    if not re.match(r"^[+-]\d+$", text):
+        return
+
     if chat_id not in ledger:
         ledger[chat_id] = 0
+        
     try:
         amount = int(text)
         ledger[chat_id] += amount
         sign = "+" if amount > 0 else ""
-        await update.message.reply_text(f"✅ 已记录: {sign}{amount:,} 韩元\n💰 当前总额: {ledger[chat_id]:,} 韩元")
+        await update.message.reply_text(f"✅ 已记录: {sign}{amount:,} 韩元\n💰 今日当前总额: {ledger[chat_id]:,} 韩元")
     except ValueError:
         return
 
 async def query_total(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
+    
+    # 🔥 检查是否跨天
+    check_and_reset_daily()
+    
     total = ledger.get(chat_id, 0)
-    await update.message.reply_text(f"📊 当前累计总额：{total:,} 韩元")
+    await update.message.reply_text(f"📊 今日累计总额：{total:,} 韩元")
 
 async def start_bot_async(token):
     """在独立的事件循环中初始化并运行机器人"""
@@ -58,7 +90,7 @@ def run_bot_thread():
         logging.error("❌ 错误: 未找到环境变量 BOT_TOKEN")
         return
     
-    # 🔥 核心修复：显式为这个后台线程创建并设置一个新的事件循环
+    # 显式为这个后台线程创建并设置一个新的事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
